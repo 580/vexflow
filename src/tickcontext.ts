@@ -1,26 +1,30 @@
-// [VexFlow](http://vexflow.com) - Copyright (c) Mohit Muthanna 2010.
+// [VexFlow](https://vexflow.com) - Copyright (c) Mohit Muthanna 2010.
 //
 // ## Description
 // A formatter for abstract tickable objects, such as notes, chords,
 // tabs, etc.
 
-import { Vex } from './vex';
-import { Tickable } from './tickable';
 import { Fraction } from './fraction';
-import { Metrics, Note } from './note';
+import { NoteMetrics } from './note';
+import { Tickable } from './tickable';
+import { RuntimeError } from './util';
+
+export interface TickContextMetrics extends NoteMetrics {
+  totalLeftPx: number;
+  totalRightPx: number;
+}
 
 export interface TickContextOptions {
   tickID: number;
 }
 
 /**
- * Tickcontext formats abstract tickable objects, such as notes, chords,
- * tabs, etc.
+ * TickContext formats abstract tickable objects, such as notes, chords, tabs, etc.
  */
-export class TickContext extends Tickable {
+export class TickContext {
   protected readonly tickID: number;
-  protected readonly tickables: Note[];
-  protected readonly tickablesByVoice: Record<string, Note>;
+  protected readonly tickables: Tickable[];
+  protected readonly tickablesByVoice: Record<string, Tickable>;
   protected currentTick: Fraction;
   protected maxTicks: Fraction;
   protected padding: number;
@@ -35,13 +39,15 @@ export class TickContext extends Tickable {
   protected modRightPx: number;
   protected totalLeftPx: number;
   protected totalRightPx: number;
-  protected maxTickable?: Note;
+  protected maxTickable?: Tickable;
   protected minTicks?: Fraction;
-  protected minTickable?: Note;
+  protected minTickable?: Tickable;
   tContexts: TickContext[];
 
-  // eslint-disable-next-line
-  draw() {}
+  protected preFormatted: boolean = false;
+  protected postFormatted: boolean = false;
+  protected width: number;
+  protected formatterMetrics: { freedom: { left: number; right: number } };
 
   static getNextContext(tContext: TickContext): TickContext | undefined {
     const contexts = tContext.tContexts;
@@ -51,9 +57,7 @@ export class TickContext extends Tickable {
   }
 
   constructor(options?: TickContextOptions) {
-    super();
     this.tickID = options && options.tickID ? options.tickID : 0;
-    this.setAttribute('type', 'TickContext');
     this.currentTick = new Fraction(0, 1);
 
     this.maxTicks = new Fraction(0, 1);
@@ -66,7 +70,7 @@ export class TickContext extends Tickable {
     this.xBase = 0; // base x position without xOffset
     this.xOffset = 0; // xBase and xOffset are an alternative way to describe x (x = xB + xO)
     this.tickables = []; // Notes, tabs, chords, lyrics.
-    this.tickablesByVoice = {}; // Tickables indeced by voice number
+    this.tickablesByVoice = {}; // Tickables indexed by voice number
 
     // Formatting metrics
     this.notePx = 0; // width of widest note in this context
@@ -78,6 +82,14 @@ export class TickContext extends Tickable {
     this.totalLeftPx = 0; // Total left pixels
     this.totalRightPx = 0; // Total right pixels
     this.tContexts = []; // Parent array of tick contexts
+
+    this.width = 0;
+    this.formatterMetrics = {
+      // The freedom of a tickcontext is the distance it can move without colliding
+      // with neighboring elements. A formatter can set these values during its
+      // formatting pass, which a different formatter can then use to fine tune.
+      freedom: { left: 0, right: 0 },
+    };
   }
 
   getTickID(): number {
@@ -130,32 +142,37 @@ export class TickContext extends Tickable {
     return this.minTicks;
   }
 
-  getMaxTickable(): Note | undefined {
+  getMaxTickable(): Tickable | undefined {
     return this.maxTickable;
   }
 
-  getMinTickable(): Note | undefined {
+  getMinTickable(): Tickable | undefined {
     return this.minTickable;
   }
 
-  getTickables(): Note[] {
+  getTickables(): Tickable[] {
     return this.tickables;
   }
 
-  getTickablesForVoice(voiceIndex: number): Note {
+  /**
+   * Introduced on 2020-04-17 as getTickablesForVoice(voiceIndex).
+   *   https://github.com/0xfe/vexflow/blame/dc97b0cc5bb93171c0038638c34362dc958222ca/src/tickcontext.js#L63
+   * Renamed on 2021-08-05 to getTickableForVoice(voiceIndex). Method renamed to singular, since it returns one Tickable.
+   */
+  getTickableForVoice(voiceIndex: number): Tickable {
     return this.tickablesByVoice[voiceIndex];
   }
 
-  getTickablesByVoice(): Record<string, Note> {
+  getTickablesByVoice(): Record<string, Tickable> {
     return this.tickablesByVoice;
   }
 
-  getCenterAlignedTickables(): Note[] {
+  getCenterAlignedTickables(): Tickable[] {
     return this.tickables.filter((tickable) => tickable.isCenterAligned());
   }
 
   /** Gets widths context, note and left/right modifiers for formatting. */
-  getMetrics(): Metrics {
+  getMetrics(): TickContextMetrics {
     const {
       width,
       glyphPx,
@@ -189,14 +206,12 @@ export class TickContext extends Tickable {
     this.preFormatted = false;
   }
 
-  addTickable(tickable: Note, voiceIndex?: number): this {
+  addTickable(tickable: Tickable, voiceIndex?: number): this {
     if (!tickable) {
-      throw new Vex.RERR('BadArgument', 'Invalid tickable added.');
+      throw new RuntimeError('BadArgument', 'Invalid tickable added.');
     }
 
     if (!tickable.shouldIgnoreTicks()) {
-      this.ignore_ticks = false;
-
       const ticks = tickable.getTicks();
 
       if (ticks.greaterThan(this.maxTicks)) {
@@ -257,5 +272,9 @@ export class TickContext extends Tickable {
     if (this.postFormatted) return this;
     this.postFormatted = true;
     return this;
+  }
+
+  getFormatterMetrics(): { freedom: { left: number; right: number } } {
+    return this.formatterMetrics;
   }
 }

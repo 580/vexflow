@@ -1,25 +1,29 @@
-// [VexFlow](http://vexflow.com) - Copyright (c) Mohit Muthanna 2010.
+// [VexFlow](https://vexflow.com) - Copyright (c) Mohit Muthanna 2010.
 
-import { GlyphNote } from './glyphnote';
 import { Glyph } from './glyph';
+import { GlyphNote, GlyphNoteOptions } from './glyphnote';
 import { NoteStruct } from './note';
-import { GlyphNoteOptions } from './types/common';
+import { Tables } from './tables';
+import { Category } from './typeguard';
+
+// Map `type` to SMuFL glyph code.
+const CODES: Record<string, string> = {
+  '1': 'repeat1Bar',
+  '2': 'repeat2Bars',
+  '4': 'repeat4Bars',
+  slash: 'repeatBarSlash',
+};
 
 export class RepeatNote extends GlyphNote {
+  static get CATEGORY(): string {
+    return Category.RepeatNote;
+  }
+
   constructor(type: string, noteStruct?: NoteStruct, options?: GlyphNoteOptions) {
-    // Smufl Codes
-    const CODES = {
-      '1': 'repeat1Bar',
-      '2': 'repeat2Bars',
-      '4': 'repeat4Bars',
-      slash: 'repeatBarSlash',
-    } as Record<string, string>;
-
-    super(null, { duration: 'q', align_center: type !== 'slash', ...noteStruct }, options);
-    this.setAttribute('type', 'RepeatNote');
-
     const glyphCode = CODES[type] || 'repeat1Bar';
-    const glyph = new Glyph(glyphCode, this.musicFont.lookupMetric('repeatNote.point', 40), { category: 'repeatNote' });
-    this.setGlyph(glyph);
+    const glyph = new Glyph(glyphCode, Tables.currentMusicFont().lookupMetric('repeatNote.point', 40), {
+      category: 'repeatNote',
+    });
+    super(glyph, { duration: 'q', align_center: type !== 'slash', ...noteStruct }, options);
   }
 }

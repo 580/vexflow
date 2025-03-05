@@ -1,19 +1,18 @@
-// [VexFlow](http://vexflow.com) - Copyright (c) Mohit Muthanna 2010.
+// [VexFlow](https://vexflow.com) - Copyright (c) Mohit Muthanna 2010.
 //
 // ## Description
 // This file implements the `Stem` object. Generally this object is handled
 // by its parent `StemmableNote`.
 
-import { Vex } from './vex';
-import { Element } from './element';
-import { Flow } from './tables';
 import { BoundingBox } from './boundingbox';
+import { Element } from './element';
+import { Tables } from './tables';
+import { Category } from './typeguard';
+import { log, RuntimeError } from './util';
 
-// To enable logging for this class. Set `Vex.Flow.Stem.DEBUG` to `true`.
-function L(
-  // eslint-disable-next-line
-  ...args: any[]) {
-  if (Stem.DEBUG) Vex.L('Vex.Flow.Stem', args);
+// eslint-disable-next-line
+function L(...args: any[]) {
+  if (Stem.DEBUG) log('Vex.Flow.Stem', args);
 }
 
 export interface StemOptions {
@@ -33,9 +32,28 @@ export interface StemOptions {
 }
 
 export class Stem extends Element {
-  static DEBUG: boolean;
+  /** To enable logging for this class. Set `Vex.Flow.Stem.DEBUG` to `true`. */
+  static DEBUG: boolean = false;
 
-  renderHeightAdjustment: number;
+  static get CATEGORY(): string {
+    return Category.Stem;
+  }
+
+  // Stem directions
+  static get UP(): number {
+    return 1;
+  }
+  static get DOWN(): number {
+    return -1;
+  }
+
+  // Theme
+  static get WIDTH(): number {
+    return Tables.STEM_WIDTH;
+  }
+  static get HEIGHT(): number {
+    return Tables.STEM_HEIGHT;
+  }
 
   protected hide: boolean;
   protected isStemlet: boolean;
@@ -50,32 +68,10 @@ export class Stem extends Element {
   protected stem_down_y_base_offset: number = 0;
   protected stem_direction: number;
   protected stem_extension: number;
-
-  static get CATEGORY(): string {
-    return 'stem';
-  }
-
-  // Stem directions
-  static get UP(): number {
-    return 1;
-  }
-
-  static get DOWN(): number {
-    return -1;
-  }
-
-  // Theme
-  static get WIDTH(): number {
-    return Flow.STEM_WIDTH;
-  }
-
-  static get HEIGHT(): number {
-    return Flow.STEM_HEIGHT;
-  }
+  protected renderHeightAdjustment: number;
 
   constructor(options?: StemOptions) {
     super();
-    this.setAttribute('type', 'Stem');
 
     // Default notehead x bounds
     this.x_begin = options?.x_begin || 0;
@@ -138,11 +134,6 @@ export class Stem extends Element {
     this.y_bottom = y_bottom;
   }
 
-  // The category of the object
-  getCategory(): string {
-    return Stem.CATEGORY;
-  }
-
   // Gets the entire height for the stem
   getHeight(): number {
     const y_offset = this.stem_direction === Stem.UP ? this.stem_up_y_offset : this.stem_down_y_offset;
@@ -151,12 +142,12 @@ export class Stem extends Element {
   }
 
   getBoundingBox(): BoundingBox {
-    throw new Vex.RERR('NotImplemented', 'getBoundingBox() not implemented.');
+    throw new RuntimeError('NotImplemented', 'getBoundingBox() not implemented.');
   }
 
   // Get the y coordinates for the very base of the stem to the top of
   // the extension
-  getExtents(): Record<string, number> {
+  getExtents(): { topY: number; baseY: number } {
     const isStemUp = this.stem_direction === Stem.UP;
     const ys = [this.y_top, this.y_bottom];
     const stemHeight = Stem.HEIGHT + this.stem_extension;
@@ -177,6 +168,14 @@ export class Stem extends Element {
     this.isStemlet = isStemlet;
     this.stemletHeight = stemletHeight;
     return this;
+  }
+
+  adjustHeightForFlag(): void {
+    this.renderHeightAdjustment = Tables.currentMusicFont().lookupMetric('stem.heightAdjustmentForFlag', -3);
+  }
+
+  adjustHeightForBeam(): void {
+    this.renderHeightAdjustment = -Stem.WIDTH / 2;
   }
 
   // Render the stem onto the canvas
@@ -211,13 +210,15 @@ export class Stem extends Element {
 
     // Draw the stem
     ctx.save();
-    this.applyStyle(ctx);
+    this.applyStyle();
+    ctx.openGroup('stem', this.getAttribute('id'), { pointerBBox: true });
     ctx.beginPath();
     ctx.setLineWidth(Stem.WIDTH);
     ctx.moveTo(stem_x, stem_y - stemletYOffset + y_base_offset);
     ctx.lineTo(stem_x, stem_y - stemHeight - this.renderHeightAdjustment * stem_direction);
     ctx.stroke();
-    this.restoreStyle(ctx);
+    ctx.closeGroup();
+    this.restoreStyle();
     ctx.restore();
   }
 }

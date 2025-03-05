@@ -9,57 +9,48 @@
 #
 # Usage:
 #
-#  First generate the PNG images from the tests into build/images.
+#  First generate the PNG images from the tests into build/images/.
 #
-#    $ ./tools/generate_png_images.js
+#    ./tools/generate_images.js build          ./build/images/current
+#    ./tools/generate_images.js reference      ./build/images/reference
+#    ./tools/generate_images.js releases/3.0.9 ./build/images/3.0.9
 #
-#  Run the regression tests against the reference or blessed images in tests/blessed.
+#  Run the visual regression tests against the reference images.
 #
-#    $ ./tools/visual_regression.js (reference|blessed) [test_prefix]
+#    ./tools/visual_regression.sh ( reference | 3.0.9 | X.Y.Z ) [prefix]
 #
-#  Check build/images/diff/results.txt for results. This file is sorted
-#  by PHASH difference (most different files on top.) The composite diff
-#  images for failed tests (i.e., PHASH > 1.0) are stored in build/images/diff.
+#  The optional argument allows you to compare a subset of the images
+#  (only those with names starting with the specified prefix).
 #
-#  If you are satisfied with the differences, copy *.png from build/images
-#  into tests/blessed, and submit your change.
+#  Check build/images/diff/results.txt for results. The composite diff
+#  images for failed tests are stored in build/images/diff.
+#
 
 # PNG viewer on OSX. Switch this to whatever your system uses.
 # VIEWER=open
 
+# use . as decimal separator
+LC_NUMERIC="en_US.UTF-8"
+
 # Check ImageMagick installation
 command -v convert >/dev/null 2>&1 || { echo >&2 "Error: ImageMagick not found."; exit 1; }
-
-# Show images over this PHASH threshold. This is probably too low, but
-# a good first pass.
-THRESHOLD=0.01
 
 # Directories. You might want to change BASE, if you're running from a
 # different working directory.
 BASE=.
-if [ "$1" == "reference" ]
-then
-  ADIR=$BASE/build/images/reference
-  ANAME=Reference
-  BDIR=$BASE/build/images/current
-  BNAME=Current
-  DIFF=$BASE/build/images/diff
-elif  [ "$1" == "blessed" ]
-then
-  ADIR=$BASE/build/images/blessed
-  ANAME=Blessed
-  BDIR=$BASE/build/images/current
-  BNAME=Current
-  DIFF=$BASE/build/images/diff
-else
-  echo >&2 "Usage: visual_regresion.sh (reference|blessed) [test_prefix]"; exit 1;
-fi
+ADIR=$BASE/build/images/$1
+ANAME=$1
+BDIR=$BASE/build/images/current
+BNAME=current
+DIFF=$BASE/build/images/diff
 
-# All results are stored here.
+
+# All results are stored in the build/images/diff directory
+# The results.txt and warnings.txt contain the output.
+mkdir -p $DIFF
 RESULTS=$DIFF/results.txt
 WARNINGS=$DIFF/warnings.txt
 
-mkdir -p $DIFF
 if [ -e "$RESULTS" ]
 then
   rm $DIFF/*
@@ -89,7 +80,7 @@ totalImagesB=`ls -1 $BDIR/$files | wc -l | xargs` # xargs trims spaces
 if [ $? -ne 0 ] || [ "$totalImagesB" -lt 1 ]
 then
   echo Missing images in $BDIR.
-  echo Please run \"npm run generate\"
+  echo Please run \"grunt generate:current\"
   exit 1
 fi
 
@@ -97,13 +88,13 @@ totalImagesA=`ls -1 $ADIR/$files | wc -l | xargs`
 if [ $? -ne 0 ] || [ "$totalImagesA" -lt 1 ]
 then
   echo Missing images in $ADIR.
-  echo Please run \"npm run generate\"
+  echo Please run \"grunt generate:reference\"
   exit 1
 fi
 # check that #ImagesA == #ImagesB (will continue anyways)
 if [ ! "$totalImagesA" -eq "$totalImagesB" ]
 then
-  echo "Warning: Number of (matching) $BNAME images ($totalImagesB) is not the same as $ANAME images ($totalImagesA). Continuing anyways."
+  echo "Warning: Number of (matching) [$BNAME] images ($totalImagesB) is not the same as [$ANAME] images ($totalImagesA). Continuing anyways."
 fi
 # ----------------- end of sanity checks -----------------
 
@@ -114,7 +105,7 @@ if [ -n "$NPROC" ]; then
   nproc=$NPROC
 fi
 
-echo "Running $totalImagesA tests with threshold $THRESHOLD (nproc=$nproc)..."
+echo "Running $totalImagesA tests (nproc=$nproc)..."
 
 function ProgressBar {
     let _progress=(${1}*100/${2}*100)/100
@@ -145,31 +136,25 @@ function diff_image() {
     return
   fi
 
+  # If the two files are byte-for-byte identical, skip the image comparison below.
+  cmp -s $fileA $fileB && return
+
   cp $fileA $diff-a.png
   cp $fileB $diff-b.png
 
-  # Calculate the difference metric and store the composite diff image.
-  local hash=`compare -metric PHASH -highlight-color '#ff000050' $diff-b.png $diff-a.png $diff-diff.png 2>&1`
-
-  local isGT=`echo "$hash > $THRESHOLD" | bc -l`
-  if [ "$isGT" == "1" ]
-  then
-    # Add the result to results.text
-    echo $name $hash >$diff.fail
-    # Threshold exceeded, save the diff and the original, current
-    cp $diff-diff.png $DIFF/$name.png
-    cp $diff-a.png $DIFF/$name'_'$ANAME.png
-    cp $diff-b.png $DIFF/$name'_'$BNAME.png
-    echo
-    echo "Test: $name"
-    echo "  PHASH value exceeds threshold: $hash > $THRESHOLD"
-    echo "  Image diff stored in $DIFF/$name.png"
-    # $VIEWER "$diff-diff.png" "$diff-a.png" "$diff-b.png"
-    # echo 'Hit return to process next image...'
-    # read
-  else
-    echo $name $hash >$diff.pass
-  fi
+  # Store the composite diff image.
+  # Add the result to results.text
+  echo $name >$diff.fail
+  # Threshold exceeded, save the diff and the original, current
+  cp $diff-diff.png $DIFF/$name.png
+  cp $diff-a.png $DIFF/$name'_'$ANAME.png
+  cp $diff-b.png $DIFF/$name'_'$BNAME.png
+  echo
+  echo "Test: $name"
+  echo "  Image diff stored in $DIFF/$name.png"
+  # $VIEWER "$diff-diff.png" "$diff-a.png" "$diff-b.png"
+  # echo 'Hit return to process next image...'
+  # read
   rm -f $diff-a.png $diff-b.png $diff-diff.png
 }
 
@@ -197,7 +182,7 @@ wait
 cat $BDIR/*.warn 1>$WARNINGS 2>/dev/null
 rm -f $BDIR/*.warn
 
-## Check for files newly built that are not yet blessed.
+# Check for files newly built that are not in the reference.
 for image in $BDIR/$files
 do
   name=`basename $image .png`
@@ -216,15 +201,15 @@ cat $BDIR/*.fail 1>$RESULTS.fail 2>/dev/null
 num_fails=`cat $RESULTS.fail | wc -l`
 rm -f  $BDIR/*.fail
 
-# Sort results by PHASH
-sort -r -n -k 2 $RESULTS.fail >$RESULTS
-sort -r -n -k 2 $BDIR/*.pass 1>>$RESULTS 2>/dev/null
-rm -f $BDIR/*.pass $RESULTS.fail
+# Sort results
+sort $RESULTS.fail >$RESULTS
+
+# The previous cleanup approach (rm -f) triggered the error: Argument list too long.
+rm -f $RESULTS.fail
 
 echo
 echo Results stored in $DIFF/results.txt
-echo All images with a difference over threshold, $THRESHOLD, are
-echo available in $DIFF, sorted by perceptual hash.
+echo All images with a difference, are available in $DIFF.
 echo
 
 if [ "$num_warnings" -gt 0 ]
@@ -239,5 +224,5 @@ then
   echo "You have $num_fails fail(s):"
   head -n $num_fails $RESULTS
 else
-  echo "Success - All diffs under threshold!"
+  echo "Success - No differences!"
 fi

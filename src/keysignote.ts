@@ -1,15 +1,20 @@
-// [VexFlow](http://vexflow.com) - Copyright (c) Mohit Muthanna 2010.
+// [VexFlow](https://vexflow.com) - Copyright (c) Mohit Muthanna 2010.
 // Author Mark Meeus 2019
 
-import { Vex } from './vex';
-import { Note } from './note';
 import { KeySignature } from './keysignature';
+import { ModifierContext } from './modifiercontext';
+import { Note } from './note';
+import { Category } from './typeguard';
 
 export class KeySigNote extends Note {
+  static get CATEGORY(): string {
+    return Category.KeySigNote;
+  }
+
   protected keySignature: KeySignature;
-  constructor(keySpec: string, cancelKeySpec: string, alterKeySpec: string) {
+
+  constructor(keySpec: string, cancelKeySpec?: string, alterKeySpec?: string[]) {
     super({ duration: 'b' });
-    this.setAttribute('type', 'KeySigNote');
 
     this.keySignature = new KeySignature(keySpec, cancelKeySpec, alterKeySpec);
 
@@ -17,27 +22,24 @@ export class KeySigNote extends Note {
     this.ignore_ticks = true;
   }
 
-  addToModifierContext(): this {
-    /* overridden to ignore */
+  /* Overridden to ignore */
+  // eslint-disable-next-line
+  addToModifierContext(mc: ModifierContext): this {
+    // DO NOTHING.
     return this;
   }
 
   preFormat(): this {
-    this.setPreFormatted(true);
-    this.keySignature.setStave(this.stave);
-    this.keySignature.format();
-    this.setWidth(this.keySignature.width);
+    this.preFormatted = true;
+    this.keySignature.setStave(this.checkStave());
+    this.setWidth(this.keySignature.getWidth());
     return this;
   }
 
   draw(): void {
-    if (!this.stave) {
-      throw new Vex.RERR('NoStave', 'No stave attached to this note.');
-    }
-
-    const ctx = this.stave.checkContext();
+    const ctx = this.checkStave().checkContext();
     this.setRendered();
-    this.keySignature.x = this.getAbsoluteX();
+    this.keySignature.setX(this.getAbsoluteX());
     this.keySignature.setContext(ctx);
     this.keySignature.draw();
   }

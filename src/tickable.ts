@@ -1,25 +1,17 @@
-// [VexFlow](http://vexflow.com) - Copyright (c) Mohit Muthanna 2010.
-//
-// ## Description
-// The tickable interface. Tickables are things that sit on a score and
-// have a duration, i.e., they occupy space in the musical rendering dimension.
+// [VexFlow](https://vexflow.com) - Copyright (c) Mohit Muthanna 2010.
+// MIT License
 
-import { Vex } from './vex';
 import { Element } from './element';
-import { Flow } from './tables';
 import { Fraction } from './fraction';
-import { TickContext } from './tickcontext';
-import { ModifierContext } from './modifiercontext';
-import { Tuplet } from './tuplet';
-import { Voice } from './voice';
 import { Modifier } from './modifier';
-
-//** Spacing */
-export interface Space {
-  used: number;
-  mean: number;
-  deviation: number;
-}
+import { ModifierContext } from './modifiercontext';
+import { Stave } from './stave';
+import { Tables } from './tables';
+import { TickContext } from './tickcontext';
+import { Tuplet } from './tuplet';
+import { Category } from './typeguard';
+import { defined, RuntimeError } from './util';
+import { Voice } from './voice';
 
 /** Formatter metrics interface */
 export interface FormatterMetrics {
@@ -29,7 +21,11 @@ export interface FormatterMetrics {
     right: number;
   };
   iterations: number;
-  space: Space;
+  space: {
+    used: number;
+    mean: number;
+    deviation: number;
+  };
 }
 
 /**
@@ -37,6 +33,10 @@ export interface FormatterMetrics {
  * has a duration, i.e., Tickables occupy space in the musical rendering dimension.
  */
 export abstract class Tickable extends Element {
+  static get CATEGORY(): string {
+    return Category.Tickable;
+  }
+
   protected ignore_ticks: boolean;
   protected tupletStack: Tuplet[];
   protected tuplet?: Tuplet;
@@ -45,8 +45,6 @@ export abstract class Tickable extends Element {
   protected voice?: Voice;
   protected width: number;
   protected x_shift: number;
-  protected preFormatted: boolean;
-  protected postFormatted: boolean;
   protected modifierContext?: ModifierContext;
   protected tickContext?: TickContext;
   protected modifiers: Modifier[];
@@ -55,10 +53,11 @@ export abstract class Tickable extends Element {
   protected intrinsicTicks: number;
   protected align_center: boolean;
 
-  /** Constructor */
+  private _preFormatted: boolean = false;
+  private _postFormatted: boolean = false;
+
   constructor() {
     super();
-    this.setAttribute('type', 'Tickable');
 
     // These properties represent the duration of
     // this tickable element.
@@ -71,8 +70,6 @@ export abstract class Tickable extends Element {
     this.x_shift = 0; // Shift from tick context
 
     this.modifiers = [];
-    this.preFormatted = false;
-    this.postFormatted = false;
     this.tupletStack = [];
 
     this.align_center = false;
@@ -107,61 +104,64 @@ export abstract class Tickable extends Element {
     };
   }
 
-  /** Resets the Tickable, this function will be overloaded. */
+  /** Reset the Tickable, this function will be overloaded. */
   reset(): this {
     return this;
   }
 
-  /** Returns the ticks. */
+  /** Return the ticks. */
   getTicks(): Fraction {
     return this.ticks;
   }
 
-  /** Checks if it ignores the ticks. */
+  /** Check if it ignores the ticks. */
   shouldIgnoreTicks(): boolean {
     return this.ignore_ticks;
   }
 
-  /** Sets width of note. Used by the formatter for positioning. */
+  /** Ignore the ticks. */
+  setIgnoreTicks(flag: boolean): this {
+    this.ignore_ticks = flag;
+    return this;
+  }
+
+  /** Set width of note. Used by the formatter for positioning. */
   setWidth(width: number): void {
     this.width = width;
   }
 
-  /** Gets width of note. Used by the formatter for positioning. */
+  /** Get width of note. Used by the formatter for positioning. */
   getWidth(): number {
-    if (!this.preFormatted) {
-      throw new Vex.RERR('UnformattedNote', "Can't call GetWidth on an unformatted note.");
+    if (!this._preFormatted) {
+      throw new RuntimeError('UnformattedNote', "Can't call GetWidth on an unformatted note.");
     }
 
     return this.width + (this.modifierContext ? this.modifierContext.getWidth() : 0);
   }
 
-  /** Displaces note by `x` pixels. Used by the formatter. */
+  /** Displace note by `x` pixels. Used by the formatter. */
   setXShift(x: number): this {
     this.x_shift = x;
     return this;
   }
 
-  /** Gets the `x`pixels of the note. */
+  /** Get the `x` displaced pixels of the note. */
   getXShift(): number {
     return this.x_shift;
   }
 
-  /** Gets `X` position of this tick context. */
+  /** Get `x` position of this tick context. */
   getX(): number {
-    if (!this.tickContext) {
-      throw new Vex.RERR('NoTickContext', 'Note needs a TickContext assigned for an X-Value');
-    }
-
-    return this.tickContext.getX() + this.x_shift;
+    const tickContext = this.checkTickContext(`Can't getX() without a TickContext.`);
+    return tickContext.getX() + this.x_shift;
   }
 
-  /** Returns the formatterMetrics */
+  /** Return the formatterMetrics. */
   getFormatterMetrics(): FormatterMetrics {
     return this.formatterMetrics;
   }
 
-  /** Returns the center x shift. */
+  /** Return the center `x` shift. */
   getCenterXShift(): number {
     if (this.isCenterAligned()) {
       return this.center_x_shift;
@@ -170,40 +170,50 @@ export abstract class Tickable extends Element {
     return 0;
   }
 
-  // Checks if tickable is center aligned. */
+  /** Set the center `x` shift. */
+  setCenterXShift(centerXShift: number): this {
+    this.center_x_shift = centerXShift;
+    return this;
+  }
+
+  // Check if tickable is center aligned. */
   isCenterAligned(): boolean {
     return this.align_center;
   }
 
-  // Sets/unsets center alignment. */
+  // Set/unset center alignment. */
   setCenterAlignment(align_center: boolean): this {
     this.align_center = align_center;
     return this;
   }
 
   /**
-   * Returns the associated voice. Every tickable must be associated with a voice.
+   * Return the associated voice. Every tickable must be associated with a voice.
    * This allows formatters and preFormatter to associate them with the right modifierContexts.
    */
   getVoice(): Voice {
-    if (!this.voice) throw new Vex.RERR('NoVoice', 'Tickable has no voice.');
-    return this.voice;
+    return defined(this.voice, 'NoVoice', 'Tickable has no voice.');
   }
 
-  /** Sets the associated voice. */
+  /** Set the associated voice. */
   setVoice(voice: Voice): void {
     this.voice = voice;
   }
 
-  /** Gets the tuplet */
+  /** Get the tuplet. */
   getTuplet(): Tuplet | undefined {
     return this.tuplet;
   }
 
-  /*
-   * Resets the specific Tuplet if this is not provided, all tuplets are reset.
-   * Removes any prior tuplets from the tick calculation and
-   * resets the intrinsic tick value to
+  /** Return a list of Tuplets. */
+  getTupletStack(): Tuplet[] {
+    return this.tupletStack;
+  }
+
+  /**
+   * Reset the specific Tuplet (if this is not provided, all tuplets are reset).
+   * Remove any prior tuplets from the tick calculation and
+   * reset the intrinsic tick value.
    */
   resetTuplet(tuplet?: Tuplet): this {
     let noteCount;
@@ -232,7 +242,7 @@ export abstract class Tickable extends Element {
     return this;
   }
 
-  /** Attaches to new tuplet. */
+  /** Attach to new tuplet. */
   setTuplet(tuplet: Tuplet): this {
     if (tuplet) {
       this.tupletStack.push(tuplet);
@@ -248,34 +258,50 @@ export abstract class Tickable extends Element {
     return this;
   }
 
-  /** Optional, if tickable has modifiers, sets modifierContext. */
-  addToModifierContext(mc: ModifierContext): void {
+  /**
+   * Add self to the provided ModifierContext `mc`.
+   * If this tickable has modifiers, set modifierContext.
+   * @returns this
+   */
+  addToModifierContext(mc: ModifierContext): this {
     this.modifierContext = mc;
-    // Add modifiers to modifier context (if any)
-    this.preFormatted = false;
-  }
-
-  /** Optional, if tickable has modifiers, associates a Modifier. */
-  addModifier(mod: Modifier): this {
-    this.modifiers.push(mod);
-    this.preFormatted = false;
+    for (let i = 0; i < this.modifiers.length; ++i) {
+      this.modifierContext.addMember(this.modifiers[i]);
+    }
+    this.modifierContext.addMember(this);
+    this._preFormatted = false;
     return this;
   }
 
-  /** Gets the list of associated modifiers. */
+  /**
+   * Optional, if tickable has modifiers, associate a Modifier.
+   * @param mod the modifier
+   */
+  // eslint-disable-next-line @typescript-eslint/no-unused-vars
+  addModifier(modifier: Modifier, index: number = 0): this {
+    this.modifiers.push(modifier);
+    this._preFormatted = false;
+    return this;
+  }
+
+  /** Get the list of associated modifiers. */
   getModifiers(): Modifier[] {
     return this.modifiers;
   }
 
-  /** Sets the Tick Contxt. */
+  /** Set the Tick Context. */
   setTickContext(tc: TickContext): void {
     this.tickContext = tc;
-    this.preFormatted = false;
+    this._preFormatted = false;
   }
 
-  /** Preformats the Tickable. */
+  checkTickContext(message = 'Tickable has no tick context.'): TickContext {
+    return defined(this.tickContext, 'NoTickContext', message);
+  }
+
+  /** Preformat the Tickable. */
   preFormat(): void {
-    if (this.preFormatted) return;
+    if (this._preFormatted) return;
 
     this.width = 0;
     if (this.modifierContext) {
@@ -284,39 +310,87 @@ export abstract class Tickable extends Element {
     }
   }
 
-  /** Postformats the Tickable. */
+  /** Set preformatted status. */
+  set preFormatted(value: boolean) {
+    this._preFormatted = value;
+  }
+
+  get preFormatted(): boolean {
+    return this._preFormatted;
+  }
+
+  /** Postformat the Tickable. */
   postFormat(): this {
-    if (this.postFormatted) return this;
-    this.postFormatted = true;
+    if (this._postFormatted) return this;
+    this._postFormatted = true;
     return this;
   }
 
-  /** Returns the intrinsic ticks */
+  /** Set postformatted status. */
+  set postFormatted(value: boolean) {
+    this._postFormatted = value;
+  }
+
+  get postFormatted(): boolean {
+    return this._postFormatted;
+  }
+
+  /** Return the intrinsic ticks. */
   getIntrinsicTicks(): number {
     return this.intrinsicTicks;
   }
 
-  /** Sets the intrinsic ticks. */
+  /** Set the intrinsic ticks. */
   setIntrinsicTicks(intrinsicTicks: number): void {
     this.intrinsicTicks = intrinsicTicks;
     this.ticks = this.tickMultiplier.clone().multiply(this.intrinsicTicks);
   }
 
-  /** Gets the tick multiplier. */
+  /** Get the tick multiplier. */
   getTickMultiplier(): Fraction {
     return this.tickMultiplier;
   }
 
-  /** Applies a tick multiplier. */
+  /** Apply a tick multiplier. */
   applyTickMultiplier(numerator: number, denominator: number): void {
     this.tickMultiplier.multiply(numerator, denominator);
     this.ticks = this.tickMultiplier.clone().multiply(this.intrinsicTicks);
   }
 
-  /** Sets the duration. */
+  /** Set the duration. */
   setDuration(duration: Fraction): void {
-    const ticks = duration.numerator * (Flow.RESOLUTION / duration.denominator);
+    const ticks = duration.numerator * (Tables.RESOLUTION / duration.denominator);
     this.ticks = this.tickMultiplier.clone().multiply(ticks);
     this.intrinsicTicks = this.ticks.value();
   }
+
+  getAbsoluteX(): number {
+    const tickContext = this.checkTickContext(`Can't getAbsoluteX() without a TickContext.`);
+    return tickContext.getX();
+  }
+
+  /** Attach this note to a modifier context. */
+  setModifierContext(mc?: ModifierContext): this {
+    this.modifierContext = mc;
+    return this;
+  }
+
+  /** Get `ModifierContext`. */
+  getModifierContext(): ModifierContext | undefined {
+    return this.modifierContext;
+  }
+
+  /** Check and get `ModifierContext`. */
+  checkModifierContext(): ModifierContext {
+    return defined(this.modifierContext, 'NoModifierContext', 'No modifier context attached to this tickable.');
+  }
+
+  /** Get the target stave. */
+  abstract getStave(): Stave | undefined;
+
+  /** Set the target stave. */
+  abstract setStave(stave: Stave): this;
+
+  // eslint-disable-next-line
+  abstract getMetrics(): any;
 }
